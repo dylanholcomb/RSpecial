@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #FAFAF7;
+  color: #0F1419;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  /* Mobile-first: keep content centered and readable on phones,
+     but cap width on larger screens so the demo still looks intentional on desktop. */
+  min-height: 100dvh;
+}
+
+/* Touch-friendly tap targets */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Subtle ink underline used in habit chips */
+.habit-underline {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 2px;
+}
