@@ -59,7 +59,14 @@ export default function MeetingPrepClient({ employeeId, employeeFirstName }: Pro
   }
 
   if (briefing) {
-    return <BriefingView briefing={briefing} provider={provider} onReset={reset} />;
+    return (
+      <BriefingView
+        briefing={briefing}
+        provider={provider}
+        purpose={purpose}
+        onReset={reset}
+      />
+    );
   }
 
   return (
@@ -145,21 +152,51 @@ export default function MeetingPrepClient({ employeeId, employeeFirstName }: Pro
 function BriefingView({
   briefing,
   provider,
+  purpose,
   onReset,
 }: {
   briefing: Briefing;
   provider: string | null;
+  purpose: MeetingPurpose;
   onReset: () => void;
 }) {
+  // Track which sections are open. All collapsed by default — manager taps in
+  // for the section they want during the 5 minutes before the meeting.
+  const [openSection, setOpenSection] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setOpenSection(prev => (prev === id ? null : id));
+  }
+
+  function expandAll() {
+    setOpenSection("__all__");
+  }
+
+  function collapseAll() {
+    setOpenSection(null);
+  }
+
+  const isOpen = (id: string) => openSection === id || openSection === "__all__";
+
   return (
-    <section className="mt-6 space-y-4">
-      <div className="rounded-2xl bg-ink-900 px-5 py-4 text-canvas-base">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-canvas-base/60">
-          Briefing for
-        </p>
-        <h2 className="mt-0.5 font-display text-2xl">{briefing.subjectName}</h2>
+    <section className="mt-6 space-y-3">
+      {/* Header card — meeting purpose at the top, prominent. */}
+      <div className="rounded-2xl bg-ink-900 px-5 py-5 text-canvas-base">
+        <span className="inline-block rounded-full bg-canvas-base px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-ink-900">
+          {purpose}
+        </span>
+        <h2 className="mt-3 font-display text-2xl leading-tight">{briefing.subjectName}</h2>
         <p className="mt-0.5 text-sm text-canvas-base/70">{briefing.subjectRole}</p>
-        <p className="mt-3 font-mono text-xs text-canvas-base/80">{briefing.hierarchyDisplay}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {briefing.archetypeName && (
+            <span className="text-sm font-semibold text-canvas-base/90">
+              {briefing.archetypeName}
+            </span>
+          )}
+          <span className="font-mono text-xs text-canvas-base/70">
+            {briefing.hierarchyDisplay}
+          </span>
+        </div>
         {provider === "demo-fallback" && (
           <p className="mt-3 inline-block rounded-full bg-canvas-base/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider">
             Demo mode — set ANTHROPIC_API_KEY for live generation
@@ -167,27 +204,157 @@ function BriefingView({
         )}
       </div>
 
-      <ScanCard label="Sense" body={briefing.sense} />
-      <ScanCard label="Connect" body={briefing.connect} />
-      <ScanCard label="Adjust" body={briefing.adjust} />
-      <ScanCard label="Navigate" body={briefing.navigate} />
+      {/* Expand / collapse all toggle */}
+      <div className="flex items-center justify-end gap-3 px-1 pt-1">
+        <button
+          type="button"
+          onClick={expandAll}
+          className="text-[11px] font-semibold uppercase tracking-wider text-ink-500 transition-colors hover:text-ink-900"
+        >
+          Expand all
+        </button>
+        <span className="text-ink-300">·</span>
+        <button
+          type="button"
+          onClick={collapseAll}
+          className="text-[11px] font-semibold uppercase tracking-wider text-ink-500 transition-colors hover:text-ink-900"
+        >
+          Collapse all
+        </button>
+      </div>
 
-      <ListCard label="Pitfalls to avoid" items={briefing.pitfallsToAvoid} tone="warn" />
+      {/* SCAN sections — each independently collapsible */}
+      <Section
+        id="sense"
+        eyebrow="SCAN"
+        label="Sense"
+        open={isOpen("sense")}
+        onToggle={() => toggle("sense")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700">{briefing.sense}</p>
+      </Section>
 
-      <SingleLineCard label="Suggested opening" body={briefing.suggestedOpening} quote />
+      <Section
+        id="connect"
+        eyebrow="SCAN"
+        label="Connect"
+        open={isOpen("connect")}
+        onToggle={() => toggle("connect")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700">{briefing.connect}</p>
+      </Section>
 
-      <ListCard label="Tailored phrases" items={briefing.tailoredPhrases} quote />
+      <Section
+        id="adjust"
+        eyebrow="SCAN"
+        label="Adjust"
+        open={isOpen("adjust")}
+        onToggle={() => toggle("adjust")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700">{briefing.adjust}</p>
+      </Section>
 
-      <ListCard label="Questions to ask" items={briefing.questionsToAsk} quote />
+      <Section
+        id="navigate"
+        eyebrow="SCAN"
+        label="Navigate"
+        open={isOpen("navigate")}
+        onToggle={() => toggle("navigate")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700">{briefing.navigate}</p>
+      </Section>
 
-      <ListCard label="What to listen for" items={briefing.whatToListenFor} />
+      <Section
+        id="opening"
+        label="Suggested opening"
+        open={isOpen("opening")}
+        onToggle={() => toggle("opening")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700 before:mr-1 before:font-display before:text-ink-300 before:content-['“'] after:font-display after:text-ink-300 after:content-['”']">
+          {briefing.suggestedOpening}
+        </p>
+      </Section>
 
-      <SingleLineCard label="Closing move" body={briefing.closingMove} />
+      <Section
+        id="pitfalls"
+        label="Pitfalls to avoid"
+        open={isOpen("pitfalls")}
+        onToggle={() => toggle("pitfalls")}
+        tone="warn"
+      >
+        <ul className="space-y-2.5">
+          {briefing.pitfallsToAvoid.map((item, i) => (
+            <li key={i} className="text-sm leading-relaxed text-amber-900">
+              {item}
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section
+        id="phrases"
+        label="Tailored phrases"
+        open={isOpen("phrases")}
+        onToggle={() => toggle("phrases")}
+      >
+        <ul className="space-y-2.5">
+          {briefing.tailoredPhrases.map((item, i) => (
+            <li
+              key={i}
+              className="text-sm leading-relaxed text-ink-700 before:mr-2 before:font-display before:text-ink-300 before:content-['“'] after:font-display after:text-ink-300 after:content-['”']"
+            >
+              {item}
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section
+        id="questions"
+        label="Questions to ask"
+        open={isOpen("questions")}
+        onToggle={() => toggle("questions")}
+      >
+        <ul className="space-y-2.5">
+          {briefing.questionsToAsk.map((item, i) => (
+            <li
+              key={i}
+              className="text-sm leading-relaxed text-ink-700 before:mr-2 before:font-display before:text-ink-300 before:content-['“'] after:font-display after:text-ink-300 after:content-['”']"
+            >
+              {item}
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section
+        id="listen"
+        label="What to listen for"
+        open={isOpen("listen")}
+        onToggle={() => toggle("listen")}
+      >
+        <ul className="space-y-2.5">
+          {briefing.whatToListenFor.map((item, i) => (
+            <li key={i} className="text-sm leading-relaxed text-ink-700">
+              {item}
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section
+        id="close"
+        label="Closing move"
+        open={isOpen("close")}
+        onToggle={() => toggle("close")}
+      >
+        <p className="text-sm leading-relaxed text-ink-700">{briefing.closingMove}</p>
+      </Section>
 
       <button
         type="button"
         onClick={onReset}
-        className="mt-2 block w-full rounded-xl bg-canvas-card px-4 py-3 text-sm font-medium text-ink-700 ring-1 ring-ink-100 transition-colors hover:ring-ink-300/60"
+        className="mt-3 block w-full rounded-xl bg-canvas-card px-4 py-3 text-sm font-medium text-ink-700 ring-1 ring-ink-100 transition-colors hover:ring-ink-300/60"
       >
         ← Start over
       </button>
@@ -195,82 +362,83 @@ function BriefingView({
   );
 }
 
-function ScanCard({ label, body }: { label: string; body: string }) {
-  return (
-    <article className="rounded-2xl bg-canvas-card p-5 ring-1 ring-ink-100">
-      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-ink-300">SCAN</p>
-      <p className="mt-1 font-display text-lg text-ink-900">{label}</p>
-      <p className="mt-2.5 text-sm leading-relaxed text-ink-700">{body}</p>
-    </article>
-  );
-}
-
-function ListCard({
+/**
+ * Collapsible section card. Header is always visible and tappable; body
+ * shows when `open` is true. Optional `eyebrow` shows a small label above
+ * the section name (e.g. "SCAN" for the four SCAN sections).
+ */
+function Section({
+  id,
+  eyebrow,
   label,
-  items,
+  open,
+  onToggle,
   tone,
-  quote,
+  children,
 }: {
+  id: string;
+  eyebrow?: string;
   label: string;
-  items: string[];
+  open: boolean;
+  onToggle: () => void;
   tone?: "warn";
-  quote?: boolean;
+  children: React.ReactNode;
 }) {
-  return (
-    <article
-      className={[
-        "rounded-2xl p-5 ring-1",
-        tone === "warn"
-          ? "bg-amber-50/70 ring-amber-200/60"
-          : "bg-canvas-card ring-ink-100",
-      ].join(" ")}
-    >
-      <p
-        className={[
-          "text-[10px] font-bold uppercase tracking-[0.22em]",
-          tone === "warn" ? "text-amber-700" : "text-ink-300",
-        ].join(" ")}
-      >
-        {label}
-      </p>
-      <ul className="mt-3 space-y-2.5">
-        {items.map((item, i) => (
-          <li
-            key={i}
-            className={[
-              "text-sm leading-relaxed",
-              tone === "warn" ? "text-amber-900" : "text-ink-700",
-              quote ? "before:mr-2 before:font-display before:text-ink-300 before:content-['“'] after:font-display after:text-ink-300 after:content-['”']" : "",
-            ].join(" ")}
-          >
-            {item}
-          </li>
-        ))}
-      </ul>
-    </article>
-  );
-}
+  const containerClass = [
+    "overflow-hidden rounded-2xl ring-1",
+    tone === "warn"
+      ? "bg-amber-50/70 ring-amber-200/60"
+      : "bg-canvas-card ring-ink-100",
+  ].join(" ");
 
-function SingleLineCard({
-  label,
-  body,
-  quote,
-}: {
-  label: string;
-  body: string;
-  quote?: boolean;
-}) {
+  const eyebrowClass = [
+    "text-[10px] font-bold uppercase tracking-[0.22em]",
+    tone === "warn" ? "text-amber-700" : "text-ink-300",
+  ].join(" ");
+
+  const labelClass = [
+    "font-display text-base leading-tight",
+    tone === "warn" ? "text-amber-900" : "text-ink-900",
+  ].join(" ");
+
+  const chevronClass = [
+    "shrink-0 transition-transform duration-200",
+    open ? "rotate-180" : "rotate-0",
+    tone === "warn" ? "text-amber-700" : "text-ink-300",
+  ].join(" ");
+
   return (
-    <article className="rounded-2xl bg-canvas-card p-5 ring-1 ring-ink-100">
-      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-ink-300">{label}</p>
-      <p
-        className={[
-          "mt-2.5 text-sm leading-relaxed text-ink-700",
-          quote ? "before:mr-1 before:font-display before:text-ink-300 before:content-['“'] after:font-display after:text-ink-300 after:content-['”']" : "",
-        ].join(" ")}
+    <article id={id} className={containerClass}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left active:bg-black/5"
       >
-        {body}
-      </p>
+        <div className="min-w-0">
+          {eyebrow && <p className={eyebrowClass}>{eyebrow}</p>}
+          <p className={labelClass}>{label}</p>
+        </div>
+        <svg
+          className={chevronClass}
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div className="px-5 pb-5">
+          {children}
+        </div>
+      )}
     </article>
   );
 }
