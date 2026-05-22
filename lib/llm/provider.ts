@@ -1,40 +1,61 @@
 // =============================================================================
 // LLM PROVIDER — FACTORY
 // -----------------------------------------------------------------------------
-// Picks the right provider based on env config. Phase 1 supports:
-//   - "anthropic" (live, requires ANTHROPIC_API_KEY)
-//   - "demo-fallback" (templated, always available)
+// Picks the right LLM provider based on environment. Supports:
 //
-// Phase 2 adds "azure-openai" — implementing the same LLMProvider interface
-// — and that becomes the default once Mosaic's tenant is configured.
+//   "vertex-gemini" — production, runs on Google Cloud Run with the project's
+//                     default service account (which needs roles/aiplatform.user).
+//                     This is the IP-protection-correct path: prompts and
+//                     responses go to Vertex AI under the enterprise-tier
+//                     no-training contract.
+//
+//   "anthropic"     — legacy, calls Anthropic's API with an API key. Retained
+//                     for local development and as a non-GCP fallback. Should
+//                     NOT see proprietary LQ content in production.
+//
+//   "demo-fallback" — templated, runs without any external service. Used
+//                     when neither live provider is available, and by the
+//                     /api/briefing route when a live provider errors.
+//
+// Auto-selection logic:
+//   - Explicit LLM_PROVIDER env var wins.
+//   - Otherwise: if running on GCP (GOOGLE_CLOUD_PROJECT is set automatically
+//     by Cloud Run), use vertex-gemini.
+//   - Otherwise: if ANTHROPIC_API_KEY is set, use anthropic.
+//   - Otherwise: demo-fallback.
 // =============================================================================
 
 import type { LLMProvider } from "./types";
 import { createAnthropicProvider } from "./anthropic";
 import { createDemoFallbackProvider } from "./demo-fallback";
+import { createVertexGeminiProvider } from "./vertex-gemini";
 
-/**
- * Returns the configured provider. If the configured live provider is
- * unavailable (e.g. no API key), automatically falls back to the demo
- * provider so the app always works.
- */
 export function getProvider(): LLMProvider {
-  const configured = (process.env.LLM_PROVIDER || "anthropic").toLowerCase();
+  const configured = (process.env.LLM_PROVIDER || "").toLowerCase();
+  const onGcp = !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.VERTEX_AI_PROJECT);
+  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
 
-  if (configured === "demo" || configured === "demo-fallback") {
-    return createDemoFallbackProvider();
+  // Explicit config wins.
+  if (configured === "vertex" || configured === "vertex-gemini" || configured === "gemini") {
+    const live = createVertexGeminiProvider();
+    return live.available ? live : createDemoFallbackProvider();
   }
-
   if (configured === "anthropic") {
     const live = createAnthropicProvider();
     return live.available ? live : createDemoFallbackProvider();
   }
+  if (configured === "demo" || configured === "demo-fallback") {
+    return createDemoFallbackProvider();
+  }
 
-  // Future: azure-openai branch goes here.
-  // if (configured === "azure" || configured === "azure-openai") {
-  //   const live = createAzureOpenAIProvider();
-  //   return live.available ? live : createDemoFallbackProvider();
-  // }
-
+  // Auto-select.
+  if (onGcp) {
+    const live = createVertexGeminiProvider();
+    if (live.available) return live;
+  }
+  if (hasAnthropic) {
+    const live = createAnthropicProvider();
+    if (live.available) return live;
+  }
   return createDemoFallbackProvider();
 }

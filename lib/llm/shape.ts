@@ -80,12 +80,34 @@ export function briefingFromJson(raw: string): BriefingShape {
   };
 }
 
-/** Render a hierarchy line for the briefing header. */
+/**
+ * Render a hierarchy line for the briefing header.
+ *
+ * Per Allison SME feedback (2026-05-22): no arrows between habits — arrows
+ * imply linear progression / hierarchy. Habits in a multi-dominant profile
+ * interplay; they do not waterfall. Use " + " as a non-directional joiner,
+ * and only show the codes that actually count for this dominance type
+ * (1 for single, 2 for dual, 3 for triple, 4 for The Flexer). Flexer has
+ * no shadow.
+ */
 export function hierarchyDisplay(engine: EngineOutput): string {
-  const dominant = engine.hierarchy.filter(h => h.role !== "shadow");
-  const dominantNames = dominant.map(h => h.code).join(" → ");
-  const shadow = engine.hierarchy.find(h => h.role === "shadow");
+  const visibleCount = (() => {
+    switch (engine.dominanceType) {
+      case "single": return 1;
+      case "dual": return 2;
+      case "triple": return 3;
+      case "non_dominant": return 4;
+    }
+  })();
+  const dominant = engine.hierarchy
+    .filter(h => h.role !== "shadow")
+    .slice(0, visibleCount)
+    .map(h => h.code)
+    .join(" + ");
+  const shadow = engine.dominanceType !== "non_dominant"
+    ? engine.hierarchy.find(h => h.role === "shadow")
+    : null;
   return shadow
-    ? `${dominantNames}  (shadow: ${shadow.code})`
-    : dominantNames;
+    ? `${dominant}  (shadow: ${shadow.code})`
+    : dominant;
 }

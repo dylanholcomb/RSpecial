@@ -1,0 +1,369 @@
+openapi: 3.1.0
+info:
+  title: LQ Platform — Listening as a Service (LaaS) API
+  version: "1.0.0"
+  summary: Versioned, partner-facing API for generating LQ briefings.
+  description: |
+    LaaS is the API surface that powers all LQ Platform clients — the web app,
+    the Chrome extension, and external partner integrations (ADP and others).
+
+    The contract is versioned. **v1 will never break.** Additive changes
+    (new fields on responses, new optional fields on requests) may be made
+    without a version bump; renames or restructures will appear under `/v2`.
+
+    ## Authentication
+    Every request must be authenticated. Two supported mechanisms:
+
+      1. **Identity-Aware Proxy (IAP)** — for browser clients on the LQ
+         Platform web app domain. Google injects authenticated user headers.
+      2. **Bearer JWT** — for the Chrome extension and partner integrations.
+         The extension obtains a Google identity via the Chrome Identity API,
+         exchanges it for an LQ-signed JWT, and includes it as
+         `Authorization: Bearer <jwt>` on every request.
+
+    Requests without valid authentication receive HTTP 401 with an
+    `unauthorized` error code.
+
+    ## Product lines
+    LaaS serves both LQ Platform product lines:
+
+      - **LQ Coach** — subjects who have taken the ECHO assessment. Returned
+        with `provenance: "manual_echo"` and `confidence: 100`.
+      - **LQ Field** (Phase 3, planned) — external subjects whose profiles
+        are inferred from observed behavior. Returned with
+        `provenance: "machine_inferred"` and a `confidence` value reflecting
+        accumulated signal. Subjects below the configured display threshold
+        (60%) are rejected with `subject_below_confidence`.
+
+    ## Error model
+    All errors return a structured body:
+    ```json
+    {
+      "error": "stable_code_string",
+      "message": "Human-readable message.",
+      "details": { "optional": "structured_context" }
+    }
+    ```
+    Error codes are stable contracts — once published, the semantic meaning
+    of a code never changes.
+
+servers:
+  - url: https://lq-platform-949628660618.us-central1.run.app
+    description: Production
+  - url: https://lq-platform-staging.example.com
+    description: Staging (not yet provisioned)
+
+tags:
+  - name: prep
+    description: Generate briefings ahead of a meeting.
+
+paths:
+  /api/laas/v1/prep:
+    post:
+      tags: [prep]
+      summary: Generate a briefing
+      description: |
+        Generates a personalized briefing for a manager preparing to meet
+        with a subject. Briefings are persisted to the caller's organization
+        for audit trail purposes. Private context, if provided, is sent to
+        the LLM to inform the briefing but is **never persisted** on the
+        server — only a boolean flag (`privateContextUsed`) is recorded.
+      operationId: generateBriefing
+      security:
+        - iap: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrepRequest"
+            examples:
+              employee_1on1:
+                summary: A 1:1 check-in with an internal employee
+                value:
+                  subject:
+                    type: employee
+                    employeeId: devon-park
+                  meeting:
+                    purpose: "1:1 check-in"
+                    topOfMind: "Q1 retention numbers came in below target."
+                    desiredOutcome: "Shared agreement on the next two experiments."
+              with_private_context:
+                summary: Sensitive context that informs the briefing only
+                value:
+                  subject:
+                    type: employee
+                    employeeId: devon-park
+                  meeting:
+                    purpose: "1:1 check-in"
+                  private:
+                    context: "Since March, Devon and her partner have been trying to conceive without success. She has hinted at this once or twice but doesn't bring it up."
+      responses:
+        "200":
+          description: Briefing generated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrepResponse"
+        "400":
+          description: Malformed request, invalid purpose, or invalid subject.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated but lacks permission to generate briefings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Subject not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Subject's inferred profile is below the display confidence threshold.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    iap:
+      type: apiKey
+      in: header
+      name: X-Goog-Authenticated-User-Email
+      description: |
+        Provided automatically by Google Cloud Identity-Aware Proxy when the
+        Cloud Run service is fronted by IAP. Browser clients on the web app
+        domain do not need to set this manually.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        LQ-signed JWT obtained by exchanging a Google identity token. Used
+        by the Chrome extension and partner integrations.
+
+  schemas:
+    PrepRequest:
+      type: object
+      required: [subject, meeting]
+      properties:
+        subject:
+          $ref: "#/components/schemas/SubjectRequest"
+        meeting:
+          $ref: "#/components/schemas/MeetingContext"
+        private:
+          $ref: "#/components/schemas/PrivateContext"
+
+    SubjectRequest:
+      oneOf:
+        - $ref: "#/components/schemas/EmployeeSubject"
+        - $ref: "#/components/schemas/ExternalSubject"
+      discriminator:
+        propertyName: type
+        mapping:
+          employee: "#/components/schemas/EmployeeSubject"
+          external: "#/components/schemas/ExternalSubject"
+
+    EmployeeSubject:
+      type: object
+      required: [type, employeeId]
+      properties:
+        type:
+          type: string
+          enum: [employee]
+        employeeId:
+          type: string
+          description: Stable identifier of the employee within the caller's organization.
+          maxLength: 200
+
+    ExternalSubject:
+      type: object
+      required: [type, externalSubjectId]
+      description: |
+        Reserved for LQ Field (Phase 3). External subjects have not taken
+        ECHO; their profile is inferred from observed behavior. Currently
+        returns `invalid_subject` until LQ Field ships.
+      properties:
+        type:
+          type: string
+          enum: [external]
+        externalSubjectId:
+          type: string
+          maxLength: 200
+
+    MeetingContext:
+      type: object
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          enum:
+            - "1:1 check-in"
+            - feedback
+            - coaching
+            - planning
+            - difficult conversation
+        topOfMind:
+          type: string
+          maxLength: 1000
+        desiredOutcome:
+          type: string
+          maxLength: 1000
+
+    PrivateContext:
+      type: object
+      description: |
+        Sensitive content that informs the briefing only. Sent to the LLM
+        provider, then discarded. NEVER persisted to the briefings
+        collection or the employee record. The audit log records only a
+        boolean flag (`privateContextUsed`) — never the content.
+      properties:
+        context:
+          type: string
+          maxLength: 2000
+
+    PrepResponse:
+      type: object
+      required: [briefing, subject, generated, meta]
+      properties:
+        briefing:
+          $ref: "#/components/schemas/Briefing"
+        subject:
+          $ref: "#/components/schemas/SubjectResponse"
+        generated:
+          $ref: "#/components/schemas/GeneratedMeta"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+
+    Briefing:
+      type: object
+      description: |
+        The generated briefing payload. Renders directly into the LQ
+        meeting-prep UI. All string fields are 2-3 sentences; array fields
+        are 4-7 items each.
+      required:
+        - subjectName
+        - subjectRole
+        - hierarchyDisplay
+        - sense
+        - connect
+        - adjust
+        - navigate
+        - pitfallsToAvoid
+        - suggestedOpening
+        - tailoredPhrases
+        - questionsToAsk
+        - whatToListenFor
+        - closingMove
+        - generatedBy
+      properties:
+        subjectName: { type: string }
+        subjectRole: { type: string }
+        archetypeName: { type: string, nullable: true }
+        hierarchyDisplay: { type: string }
+        sense: { type: string }
+        connect: { type: string }
+        adjust: { type: string }
+        navigate: { type: string }
+        pitfallsToAvoid:
+          type: array
+          items: { type: string }
+        suggestedOpening: { type: string }
+        tailoredPhrases:
+          type: array
+          items: { type: string }
+        questionsToAsk:
+          type: array
+          items: { type: string }
+        whatToListenFor:
+          type: array
+          items: { type: string }
+        closingMove: { type: string }
+        generatedBy:
+          type: string
+          enum: [live, demo-fallback]
+
+    SubjectResponse:
+      type: object
+      required: [id, type, provenance, confidence, displaySafe]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [employee, external]
+        provenance:
+          type: string
+          enum: [manual_echo, partner_supplied, machine_inferred]
+        confidence:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 100 for assessed; lower for inferred (LQ Field).
+        displaySafe:
+          type: boolean
+          description: False if confidence is below the 60% display threshold.
+
+    GeneratedMeta:
+      type: object
+      required: [by, mode, at, elapsedMs]
+      properties:
+        by:
+          type: string
+          description: "Provider name (e.g., vertex-gemini, anthropic, demo-fallback)."
+        mode:
+          type: string
+          enum: [live, demo-fallback]
+        at:
+          type: string
+          format: date-time
+        elapsedMs:
+          type: integer
+          minimum: 0
+
+    ResponseMeta:
+      type: object
+      required: [apiVersion, privateContextUsed]
+      properties:
+        apiVersion:
+          type: string
+          enum: [v1]
+        privateContextUsed:
+          type: boolean
+          description: |
+            True if the request included non-empty private context. Flag
+            only — the content is never stored or echoed.
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_request
+            - invalid_purpose
+            - invalid_subject
+            - subject_not_found
+            - subject_below_confidence
+            - unauthorized
+            - forbidden
+            - rate_limited
+            - internal_error
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true

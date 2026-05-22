@@ -1,112 +1,117 @@
 // =============================================================================
-// /api/briefing
+// /api/briefing — DEPRECATED COMPATIBILITY SHIM
 // -----------------------------------------------------------------------------
-// Server route that generates a manager briefing.
-// Flow: incoming meeting context → look up employee → run lq-engine → build
-// LLM prompt → call provider → return Briefing.
+// This route used to host the briefing generation logic directly. As of
+// May 16, 2026, the logic lives at /api/laas/v1/prep — the versioned,
+// partner-facing LaaS API surface.
 //
-// The lq-engine internals never reach the LLM; only the structured
-// EngineOutput is included in the prompt.
+// This file remains as a thin shim that:
+//   1. Translates the legacy request shape to the LaaS v1 request shape.
+//   2. Forwards to the v1 endpoint via direct handler call (no HTTP round trip).
+//   3. Translates the v1 response back to the legacy response shape clients
+//      were consuming.
+//   4. Emits a Deprecation + Sunset header (RFC 8594) so any future external
+//      consumer sees they should migrate.
+//
+// Sunset date: 2026-08-01. Delete this file once all known consumers have
+// migrated. As of today the only known consumer is the LQ Platform web app
+// itself, which is being moved off this route in the same change.
 // =============================================================================
 
 import { NextResponse } from "next/server";
-import { analyzeProfile, type MeetingContext, type MeetingPurpose } from "@/lib/lq-engine";
-import { getEmployeeById } from "@/data/employees";
-import { getProvider } from "@/lib/llm/provider";
+import { POST as laasPrep } from "@/app/api/laas/v1/prep/route";
+import type { LaasPrepRequest, LaasPrepResponse, LaasErrorResponse } from "@/lib/laas/types";
 
 export const runtime = "nodejs";
-// Always run fresh — briefings are personalized per request.
 export const dynamic = "force-dynamic";
 
-const ALLOWED_PURPOSES: MeetingPurpose[] = [
-  "1:1 check-in",
-  "feedback",
-  "coaching",
-  "planning",
-  "difficult conversation",
-];
+// Sunset target — kept here as a single source of truth, surfaced in the
+// response header and in startup logs (if we ever add a startup log).
+const SUNSET_DATE_RFC1123 = "Sat, 01 Aug 2026 00:00:00 GMT";
 
-interface BriefingRequest {
+interface LegacyBriefingRequest {
   employeeId?: unknown;
   purpose?: unknown;
   topOfMind?: unknown;
   desiredOutcome?: unknown;
+  privateContext?: unknown;
 }
 
-function asString(v: unknown, max = 2000): string {
-  return typeof v === "string" ? v.slice(0, max) : "";
+function asString(v: unknown): string {
+  return typeof v === "string" ? v : "";
 }
 
 export async function POST(req: Request) {
-  let body: BriefingRequest;
+  let legacy: LegacyBriefingRequest;
   try {
-    body = await req.json();
+    legacy = (await req.json()) as LegacyBriefingRequest;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return withDeprecationHeaders(
+      NextResponse.json({ error: "Invalid JSON" }, { status: 400 }),
+    );
   }
 
-  const employeeId = asString(body.employeeId, 200);
-  const purpose = asString(body.purpose, 100) as MeetingPurpose;
-
-  if (!employeeId) {
-    return NextResponse.json({ error: "employeeId required" }, { status: 400 });
-  }
-  if (!ALLOWED_PURPOSES.includes(purpose)) {
-    return NextResponse.json({ error: "invalid purpose" }, { status: 400 });
-  }
-
-  const employee = getEmployeeById(employeeId);
-  if (!employee) {
-    return NextResponse.json({ error: "employee not found" }, { status: 404 });
-  }
-
-  const meetingContext: MeetingContext = {
-    purpose,
-    topOfMind: asString(body.topOfMind, 1000),
-    desiredOutcome: asString(body.desiredOutcome, 1000),
+  // Translate legacy → LaaS v1 request shape.
+  const v1Body: LaasPrepRequest = {
+    subject: {
+      type: "employee",
+      employeeId: asString(legacy.employeeId),
+    },
+    meeting: {
+      purpose: asString(legacy.purpose),
+      topOfMind: asString(legacy.topOfMind),
+      desiredOutcome: asString(legacy.desiredOutcome),
+    },
+    private: {
+      context: asString(legacy.privateContext),
+    },
   };
 
-  // Run the sealed engine — produces only the *output* shape.
-  const engineOutput = analyzeProfile(employee.id, employee.scores);
+  // Construct a forwarded Request — same headers (auth, IP, etc.), v1 body.
+  // We re-use the original request's headers so auth/audit/IP carry through.
+  const forwarded = new Request(new URL("/api/laas/v1/prep", req.url), {
+    method: "POST",
+    headers: req.headers,
+    body: JSON.stringify(v1Body),
+  });
 
-  const provider = getProvider();
-  try {
-    const briefing = await provider.generate({
-      employee: {
-        id: employee.id,
-        name: employee.name,
-        role: employee.role,
-        backstory: employee.backstory,
-        recentContext: employee.recentContext,
-      },
-      engine: engineOutput,
-      meetingContext,
-    });
+  const v1Response = await laasPrep(forwarded);
 
-    return NextResponse.json({ briefing, provider: provider.name });
-  } catch (err) {
-    // If the live provider fails for any reason, generate via fallback so the
-    // user always sees something useful.
-    const message = err instanceof Error ? err.message : "Unknown LLM error";
-    console.error("[briefing] live provider failed, falling back:", message);
-
-    const { createDemoFallbackProvider } = await import("@/lib/llm/demo-fallback");
-    const fallback = createDemoFallbackProvider();
-    const briefing = await fallback.generate({
-      employee: {
-        id: employee.id,
-        name: employee.name,
-        role: employee.role,
-        backstory: employee.backstory,
-        recentContext: employee.recentContext,
-      },
-      engine: engineOutput,
-      meetingContext,
-    });
-    return NextResponse.json({
-      briefing,
-      provider: "demo-fallback",
-      providerError: message,
-    });
+  // If the v1 endpoint returned an error, translate the error shape back to
+  // the legacy { error: string } shape so existing clients don't break.
+  if (!v1Response.ok) {
+    const errBody = (await v1Response.clone().json().catch(() => ({}))) as Partial<LaasErrorResponse>;
+    return withDeprecationHeaders(
+      NextResponse.json(
+        { error: errBody.message || errBody.error || "Failed to generate briefing" },
+        { status: v1Response.status },
+      ),
+    );
   }
+
+  const v1Body2 = (await v1Response.json()) as LaasPrepResponse;
+  return withDeprecationHeaders(
+    NextResponse.json({
+      briefing: v1Body2.briefing,
+      provider: v1Body2.generated.by,
+      ...(v1Body2.generated.mode === "demo-fallback"
+        ? { providerError: "live provider unavailable, served via demo fallback" }
+        : {}),
+    }),
+  );
+}
+
+/**
+ * Attach RFC 8594 Deprecation + Sunset headers plus a Link header pointing
+ * to the successor route. External tools (Postman, browser devtools, log
+ * aggregators) surface these prominently.
+ */
+function withDeprecationHeaders(res: NextResponse): NextResponse {
+  res.headers.set("Deprecation", "true");
+  res.headers.set("Sunset", SUNSET_DATE_RFC1123);
+  res.headers.set(
+    "Link",
+    `</api/laas/v1/prep>; rel="successor-version"; type="application/json"`,
+  );
+  return res;
 }

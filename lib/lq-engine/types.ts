@@ -1,66 +1,34 @@
 // =============================================================================
 // LQ ENGINE — TYPES
 // -----------------------------------------------------------------------------
-// This file defines the public *shape* of the LQ engine's inputs and outputs.
-// It is the contract between the engine and the rest of the app.
+// Public shape of the LQ engine's inputs and outputs. This file is the
+// contract between the engine and the rest of the app.
 //
-// IMPORTANT — IP boundary:
-// The LQ engine is the only place that knows the *internals* of the LQ /
-// ECHO methodology (scoring, archetype rules, recommendation logic). Phase 1
-// uses a stub that mirrors the publicly-documented framework. Phase 2 swaps
-// the stub for Mosaic's real KB inside the company's Azure tenant. The types
-// in this file stay stable across that swap so the UI and LLM layer never
-// need to change.
-//
-// What may NEVER cross this boundary into the LLM prompt:
-//   - Raw assessment item responses
-//   - Scoring weights or rule code
-//   - Any verbatim Mosaic-proprietary KB text
-// What DOES cross the boundary into the LLM prompt:
-//   - The structured EngineOutput (profile + framed inputs for synthesis)
+// IP boundary — see SOW §11. The engine is the only place that holds
+// LQ-specific logic. UI / API route / LLM layer consume only the structured
+// EngineOutput.
 // =============================================================================
 
-/** The four ECHO listening habits, identified by their canonical 2-letter codes. */
+/** The four ECHO listening habits, identified by canonical 2-letter codes. */
 export type HabitCode = "CV" | "RV" | "AL" | "CL";
 
-/**
- * Each habit is oriented either toward the *content* of a message or toward
- * its *relational* impact on people. This is part of the public LQ framework.
- */
 export type HabitOrientation = "content" | "relational";
 
-/** Static metadata describing one habit. Surfaced in UI + prompt context. */
 export interface HabitMeta {
   code: HabitCode;
-  /** Display name, e.g. "Connective". */
   name: string;
-  /** One-line definition surfaced in UI. */
   tagline: string;
-  /** Content vs relational orientation. */
   orientation: HabitOrientation;
-  /** What this habit's filter naturally prioritizes. */
   primaryFocus: string;
-  /** What people with this habit do well. */
   strengths: string[];
-  /** Where this habit's filter creates blind spots. */
   weaknesses: string[];
-  /** How a person with this habit prefers to receive information. */
   receptionPreference: string;
-  /** What causes a person with this habit to disengage. */
   tuneOutTrigger: string;
-  /** What this habit finds especially frustrating. */
   frustration: string;
-  /** Tactical phrasing that lands well with this habit. */
   tacticalPhrasing: string[];
-  /** Tailwind theme color key (matches tailwind.config.ts). */
   themeKey: "connective" | "reflective" | "analytical" | "conceptual";
 }
 
-/**
- * A normalized 0–100 preference score for each habit. Phase 1 uses authored
- * scores attached to seeded employees. Phase 2 will compute these from real
- * ECHO assessment data inside the engine.
- */
 export interface HabitScores {
   CV: number;
   RV: number;
@@ -68,21 +36,19 @@ export interface HabitScores {
   CL: number;
 }
 
-/** A single rank in the habit hierarchy. */
 export interface HabitRank {
   code: HabitCode;
   score: number;
-  /** Where this habit sits in the hierarchy for this person. */
   role: "primary" | "secondary" | "tertiary" | "shadow";
 }
 
 /**
- * Optional archetype mapping for known profile codes (e.g. "CV-RV-AL → Resolver").
- * Not every combination has a published archetype — when none is found the
- * engine falls back to a constructed description.
+ * Lightweight archetype shape — retained for backward compatibility with
+ * the UI which displays `archetype.name`. The richer FullProfile (below)
+ * is the source of truth used by the prompt builder.
  */
 export interface Archetype {
-  code: string; // dash-joined ranked habits, e.g. "CV-RV-AL"
+  code: string;
   name: string;
   focus: string;
   risk: string;
@@ -90,26 +56,106 @@ export interface Archetype {
 }
 
 /**
- * The structured output the engine returns for a person. This is what the
- * LLM prompt builder consumes — the LLM never sees raw scores or scoring
- * rules, only this synthesized view.
+ * One of the four "How this profile interacts with [listening type]" blocks
+ * from the proprietary 41-profile catalog. Free-text guidance, treated as
+ * natural-language input to the LLM (not parsed into bullet structures).
  */
+export interface ProfileInteraction {
+  atBest: string;
+  challenges: string;
+  suggestions: string;
+}
+
+/**
+ * Dominance type — how many habits this profile relies on, per the
+ * official 41-profile taxonomy:
+ *
+ *   single      — one habit (4 profiles, e.g. The Connector)
+ *   dual        — two habits in balance (12 profiles, e.g. The Empathizer)
+ *   triple      — three habits in interplay (24 profiles, e.g. The Inventor)
+ *   non_dominant — all four habits, no preference (1 profile, The Flexer)
+ *
+ * Critical for UI + prompt language:
+ *   - dual is "balance both lanes, can stall when choosing"
+ *   - triple is "habits in interplay, mutual muting of fullest expression" —
+ *     NOT "either/or" or "balance two lanes" (SME correction, 2026-05-22)
+ *   - non_dominant has no shadow habit
+ */
+export type DominanceType = "single" | "dual" | "triple" | "non_dominant";
+
+/**
+ * A full entry from the proprietary 41-profile catalog. Loaded from
+ * profiles-41.json. This is the rich data the prompt builder includes
+ * when calling Vertex AI Gemini.
+ *
+ * v0.6 (2026-05-22): re-parsed from the canonical PDF delivered by LQ.
+ * Now includes structured strengths / possibleChallenges / shortDescription
+ * (third-person) and dominanceType. Drives the SME-correct tile copy and
+ * gives the prompt builder cleanly separated source material.
+ */
+export interface FullProfile {
+  /** Habit-chain code (e.g., "CV-RV-AL"), or "FLEXER" for the balanced profile. */
+  code: string;
+  /** Display name (e.g., "The Resolver"). */
+  name: string;
+  /** Highest-preference habit, or null for The Flexer. */
+  primaryHabit: HabitCode | null;
+  /** Ordered habit chain — primary, secondary, tertiary. */
+  habitChain: HabitCode[];
+  /** Single / dual / triple / non_dominant — derived from habitChain length. */
+  dominanceType: DominanceType;
+  /** Canonical second-person intro paragraph as written in the PDF. */
+  intro: string;
+  /**
+   * Third-person canonical intro suitable for tile copy.
+   * Replaces the legacy "Listens like the Inventor" template per SME feedback —
+   * "Inventors listen for everything that can be informative...".
+   */
+  shortDescription: string;
+  /** Canonical Strengths section. */
+  strengths: string;
+  /** Canonical Possible challenges section — this is the source of truth for "shadow" framing. */
+  possibleChallenges: string;
+  /** Five actionable insights for someone with this profile. */
+  insights: string[];
+  /** How this profile interacts with each of the four listening types. */
+  interactions: {
+    CV: ProfileInteraction;
+    RV: ProfileInteraction;
+    AL: ProfileInteraction;
+    CL: ProfileInteraction;
+  };
+}
+
+/** Structured engine output sent to the LLM prompt builder. */
 export interface EngineOutput {
   subjectId: string;
-  hierarchy: HabitRank[]; // ordered: primary, secondary, tertiary, shadow
-  /** Whether the top two scores are close enough to be "dual-dominant". */
+  hierarchy: HabitRank[];
+  /**
+   * @deprecated since v0.6 — prefer `dominanceType`. Retained for any older
+   * consumer still reading it (the API still emits it).
+   */
   dualDominant: boolean;
-  /** Optional named archetype if a known code matches. */
+  /**
+   * Dominance type per the official taxonomy. Drives both UI rendering
+   * (how many habits to show on the tile) and prompt language (interplay
+   * for triple vs. either-or for dual).
+   */
+  dominanceType: DominanceType;
+  /**
+   * Lightweight archetype shape — derived from the full profile. Retained
+   * for backward compatibility with the UI which displays archetype.name.
+   */
   archetype: Archetype | null;
-  /** Habit metadata included so the LLM has all attributes inline. */
+  /**
+   * The matched full profile from the proprietary 41-profile catalog.
+   * This is the rich data the prompt builder uses. NEW in v0.3.
+   */
+  profile: FullProfile | null;
   primaryHabit: HabitMeta;
   secondaryHabit: HabitMeta | null;
   tertiaryHabit: HabitMeta | null;
   shadowHabit: HabitMeta;
-  /**
-   * Engine-prepared, plain-English framings the LLM can quote or paraphrase.
-   * These are the "safe" outputs — they describe behavior, not the IP itself.
-   */
   framings: {
     snapshot: string;
     receptionGuide: string;
@@ -118,7 +164,6 @@ export interface EngineOutput {
   };
 }
 
-/** Meeting context provided by the manager via the form. */
 export type MeetingPurpose =
   | "1:1 check-in"
   | "feedback"
@@ -130,26 +175,54 @@ export interface MeetingContext {
   purpose: MeetingPurpose;
   topOfMind: string;
   desiredOutcome: string;
+  /**
+   * Optional dated updates the manager wants the briefing to factor in for
+   * THIS conversation only — e.g., "Last Tuesday they presented to the exec
+   * team and got pushback on slide 7," or "Since March they've been leading
+   * the new SLA workstream."
+   *
+   * PERSISTENCE: same promise as privateContext. The API route MUST strip
+   * this field from MeetingContext before persisting BriefingDoc, and the
+   * audit log only records the FACT that recent-context additions were used
+   * (recentContextAdditionsUsed: boolean), never the content.
+   *
+   * Format: free text. Manager is encouraged (via the field's helper copy)
+   * to include dates so the LLM can weight recency. No structured schema —
+   * we let the LLM read natural-language dates.
+   */
+  recentContextAdditions?: string;
+  /**
+   * Optional private context supplied by the manager for this single briefing.
+   *
+   * SENSITIVITY: this field carries information the manager would not want
+   * stored in any system of record — health, family, fertility, financial
+   * stress, personal life events. Two invariants enforce that promise:
+   *
+   *   1. The API route MUST strip privateContext from MeetingContext before
+   *      persisting BriefingDoc.meetingContext to Firestore.
+   *   2. The audit log records only the FACT that private context was used
+   *      (privateContextUsed: boolean), never the content.
+   *
+   * The prompt builder receives this content; Vertex AI processes it under
+   * the enterprise no-training contract and does not retain it.
+   */
+  privateContext?: string;
 }
 
-/** The final, manager-facing briefing object the API returns. */
 export interface Briefing {
   subjectName: string;
   subjectRole: string;
   archetypeName: string | null;
-  hierarchyDisplay: string; // e.g. "Connective → Reflective → Analytical (shadow: Conceptual)"
-  /** SCAN™-aligned sections — Sense, Connect, Adjust, Navigate */
+  hierarchyDisplay: string;
   sense: string;
   connect: string;
   adjust: string;
   navigate: string;
-  /** Action-oriented sections */
   pitfallsToAvoid: string[];
   suggestedOpening: string;
   tailoredPhrases: string[];
   questionsToAsk: string[];
   whatToListenFor: string[];
   closingMove: string;
-  /** Whether this came from the live LLM or the templated fallback. */
   generatedBy: "live" | "demo-fallback";
 }

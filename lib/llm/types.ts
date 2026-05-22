@@ -1,12 +1,15 @@
 // =============================================================================
 // LLM PROVIDER — TYPES
 // -----------------------------------------------------------------------------
-// Provider abstraction so phase 1 can call Anthropic's API and phase 2 can
-// flip to Azure OpenAI inside Mosaic's tenant without touching the engine,
-// the prompt builder, or the UI.
+// Provider abstraction so the application can run against multiple LLM
+// backends without code changes anywhere else. The factory in provider.ts
+// chooses one based on environment configuration.
+//
+// Production target on GCP: vertex-gemini (Vertex AI Gemini under the
+// enterprise no-training contract).
 // =============================================================================
 
-import type { Briefing, EngineOutput, MeetingContext } from "@/lib/lq-engine";
+import type { Briefing, EngineOutput, FullProfile, MeetingContext } from "@/lib/lq-engine";
 import type { Employee } from "@/data/employees";
 
 /** Inputs to the briefing generator — everything except scoring internals. */
@@ -16,11 +19,20 @@ export interface BriefingInputs {
   engine: EngineOutput;
   /** What the manager typed into the meeting form. */
   meetingContext: MeetingContext;
+  /**
+   * The MANAGER's own listening profile, when known. Powers the pairwise
+   * SCAN framing — Sense prompts ground in the manager's own habits and
+   * blind spots, and Adjust prompts use the manager-with-subject pairwise
+   * content from the catalog. Absent when the manager hasn't set their
+   * profile (Phase 1 picker) or when the request comes from a context that
+   * doesn't know the user yet (e.g., unauthenticated partner calls).
+   */
+  managerProfile?: FullProfile;
 }
 
 export interface LLMProvider {
   /** Human-readable name, surfaced in the UI for debugging. */
-  name: "anthropic" | "azure-openai" | "demo-fallback";
+  name: "anthropic" | "azure-openai" | "vertex-gemini" | "demo-fallback";
   /** Whether this provider is currently available (e.g. has an API key). */
   available: boolean;
   /** Generate a briefing. */

@@ -1,76 +1,66 @@
 // =============================================================================
-// LQ ENGINE — KNOWN ARCHETYPES
+// LQ ENGINE — ARCHETYPE LOOKUPS
 // -----------------------------------------------------------------------------
-// LQ publishes 41 unique listening profiles, several of which are named
-// archetypes (Resolver, Mover, Implementer, Developer, Pragmatist, Producer,
-// etc.). This file holds the archetypes we have public reference data for.
-// When a profile code doesn't match a known archetype, the engine constructs
-// a description from habit metadata instead.
+// As of v0.3 (post-2026-05-12 KB delivery), this file is a thin compatibility
+// layer over the real 41-profile catalog in profiles-41.ts.
 //
-// In phase 2 this table is replaced by Mosaic's full 41-profile catalogue.
+// The previous version (v0.2) shipped a stub table of ~7 named archetypes
+// drawn from public LQ research. That stub has been retired; all lookups
+// now go to the proprietary catalog. The Archetype shape is preserved so
+// the UI's archetype-name display continues to work without changes.
 // =============================================================================
 
-import type { Archetype } from "./types";
+import { findProfile, findProfileWithFallback } from "./profiles-41";
+import type { Archetype, FullProfile } from "./types";
 
-export const ARCHETYPES: Record<string, Archetype> = {
-  "CV-RV-AL": {
-    code: "CV-RV-AL",
-    name: "The Resolver",
-    focus: "Detail-heavy people solutions.",
-    risk: "Over-deliberation; the conversation gets stuck in nuance.",
-    prepTip: "Set strict decision-making criteria early so the depth lands on a decision, not in a loop.",
-  },
-
-  "CV-RV-CL": {
-    code: "CV-RV-CL",
-    name: "The Mover",
-    focus: "Action-oriented big ideas, anchored in people impact.",
-    risk: "Overlooking critical facts in the rush to act.",
-    prepTip: "Explicitly review 'what is true' before moving to action, and name the constraint set.",
-  },
-
-  "CV-AL": {
-    code: "CV-AL",
-    name: "The Implementer",
-    focus: "Clear paths with factual backing.",
-    risk: "Disengages if there's no clear next step.",
-    prepTip: "Bring a roadmap. Be ready to name owners and timing as soon as you've made the case.",
-  },
-
-  "CV-AL-RV": {
-    code: "CV-AL-RV",
-    name: "The Developer",
-    focus: "Balanced people-and-data approach.",
-    risk: "Impatience with slow processes.",
-    prepTip: "Lead with actionable expert solutions; show you've already weighed the data.",
-  },
-
-  "CL-RV-AL": {
-    code: "CL-RV-AL",
-    name: "The Pragmatist",
-    focus: "Critical, open-minded ideas tested against personal experience.",
-    risk: "Can feel 'drilled' by rapid questioning.",
-    prepTip: "Provide information in advance for internal reflection. Don't ambush with decisions in the room.",
-  },
-
-  "AL-RV": {
-    code: "AL-RV",
-    name: "The Auditor",
-    focus: "Content over speaker identity; rigorous vetting against personal expertise.",
-    risk: "Misses feelings and rapport entirely.",
-    prepTip: "Start with the 'what' and the 'how'. Skip the small talk — they read it as noise.",
-  },
-
-  "AL-RV-CV": {
-    code: "AL-RV-CV",
-    name: "The Producer",
-    focus: "Data-led delivery, validated by experience, then translated into team impact.",
-    risk: "Tunes out abstract or 'blue sky' thinking.",
-    prepTip: "Lead with objective data, acknowledge their track record, close with team-morale upside.",
-  },
-};
-
-/** Look up an archetype by ranked profile code. Returns null if unknown. */
+/**
+ * Look up an archetype by ranked profile code. Returns null if unknown
+ * (which should be very rare — the catalog covers 40 of the 64 possible
+ * 3-habit orderings plus single-habit and dual-habit primaries plus The
+ * Flexer).
+ *
+ * Behaviour: strict match on the full code. For progressive fallback,
+ * use the FullProfile path via findProfileWithFallback().
+ */
 export function findArchetype(code: string): Archetype | null {
-  return ARCHETYPES[code] ?? null;
+  const profile = findProfile(code);
+  if (!profile) return null;
+  return toArchetype(profile);
 }
+
+/** Derive the lightweight Archetype view from a FullProfile. */
+export function toArchetype(profile: FullProfile): Archetype {
+  // Build a one-line focus from the first sentence of the intro paragraph.
+  const focus = firstSentence(profile.intro) ?? profile.intro.slice(0, 160);
+
+  // Build risk + prep tip from key actionable insights when available;
+  // otherwise fall back to clipped intro text.
+  const risk = profile.insights.length > 0
+    ? "Watch for: " + clip(profile.insights[0], 200)
+    : "See full profile for risk patterns.";
+
+  const prepTip = profile.insights.length > 1
+    ? clip(profile.insights[1], 200)
+    : "See full profile for preparation guidance.";
+
+  return {
+    code: profile.code,
+    name: profile.name,
+    focus,
+    risk,
+    prepTip,
+  };
+}
+
+function firstSentence(text: string): string | null {
+  const match = text.match(/^[^.!?]+[.!?]/);
+  return match ? match[0].trim() : null;
+}
+
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max).trimEnd() + "…";
+}
+
+// Re-exports so consumers that imported from archetypes.ts keep working.
+export { findProfile, findProfileWithFallback } from "./profiles-41";

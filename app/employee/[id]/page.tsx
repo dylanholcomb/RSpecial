@@ -1,20 +1,28 @@
 // Employee profile + meeting context form + briefing display.
 // Server component runs the engine, hands a serializable view to the client.
+//
+// v0.5 — reads the employee from Firestore. The engine still runs server-side
+// so internals (habit hierarchy, frustration triggers, etc.) never reach the
+// client bundle. Only the framings + employee summary cross the boundary.
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getEmployeeById } from "@/data/employees";
-import { analyzeProfile } from "@/lib/lq-engine";
+import { getEmployeeById } from "@/lib/data/employees-repo";
+import { analyzeProfile, hasShadow, visibleHabitCount } from "@/lib/lq-engine";
 import { Avatar } from "@/components/Avatar";
 import { HabitChip } from "@/components/HabitChip";
+import { ScoreBars } from "@/components/ScoreBars";
 import MeetingPrepClient from "./MeetingPrepClient";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: { id: string };
 }
 
-export default function EmployeePage({ params }: PageProps) {
-  const employee = getEmployeeById(params.id);
+export default async function EmployeePage({ params }: PageProps) {
+  const employee = await getEmployeeById(params.id);
   if (!employee) notFound();
 
   const engine = analyzeProfile(employee.id, employee.scores);
@@ -42,23 +50,41 @@ export default function EmployeePage({ params }: PageProps) {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-300">
             Listening profile
           </p>
+
+          {/* Per Allison SME feedback (2026-05-22): show one habit chip for
+              single-dominant, two for dual, three for triple, all four for
+              The Flexer. NO arrows — habits in multi-dominant profiles
+              interplay; they do not waterfall. */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {engine.archetype && (
               <span className="rounded-full bg-ink-900 px-2.5 py-1 text-xs font-semibold text-canvas-base">
                 {engine.archetype.name}
               </span>
             )}
-            {engine.hierarchy.filter(h => h.role !== "shadow").map(h => (
-              <HabitChip key={h.code} code={h.code} role={h.role} size="sm" />
-            ))}
-            {engine.hierarchy.find(h => h.role === "shadow") && (
-              <HabitChip
-                code={engine.hierarchy.find(h => h.role === "shadow")!.code}
-                role="shadow"
-                size="sm"
-              />
-            )}
+            {engine.hierarchy
+              .filter(h => h.role !== "shadow")
+              .slice(0, visibleHabitCount(engine.dominanceType))
+              .map(h => (
+                <HabitChip key={h.code} code={h.code} role={h.role} size="sm" />
+              ))}
+            {hasShadow(engine.dominanceType) &&
+              engine.hierarchy.find(h => h.role === "shadow") && (
+                <HabitChip
+                  code={engine.hierarchy.find(h => h.role === "shadow")!.code}
+                  role="shadow"
+                  size="sm"
+                />
+              )}
+            <ScoreBars
+              scores={employee.scores}
+              className="ml-auto"
+              ariaLabel={`Listening scores — CV ${employee.scores.CV}, RV ${employee.scores.RV}, AL ${employee.scores.AL}, CL ${employee.scores.CL}`}
+            />
           </div>
+
+          {/* Snapshot string — now the canonical third-person short description
+              from the 41-profile catalog when we have a match (e.g., "Inventors
+              listen for everything that can be informative..."). */}
           <p className="mt-3 text-sm leading-relaxed text-ink-700">
             {engine.framings.snapshot}
           </p>
@@ -73,11 +99,18 @@ export default function EmployeePage({ params }: PageProps) {
             label="Tunes out when"
             body={engine.primaryHabit.tuneOutTrigger}
           />
-          <Snippet
-            label="Shadow blind spot"
-            body={`${engine.shadowHabit.name} — ${engine.shadowHabit.primaryFocus.toLowerCase()}`}
-            tone="warn"
-          />
+          {/* Per Allison SME feedback (2026-05-22): shadow is BOTH the
+              missed-content lane AND the tune-out trigger. Only render when
+              the dominance type has a shadow at all (Flexer has none). */}
+          {hasShadow(engine.dominanceType) && (
+            <Snippet
+              label="Shadow lane — easy to miss, easy to lose them"
+              // primaryFocus already ends with a period; strip it before
+              // continuing the sentence so we don't render "...impact.. They".
+              body={`${engine.shadowHabit.name} — ${engine.shadowHabit.primaryFocus.toLowerCase().replace(/\.$/, "")}. They are likely to tune out, get impatient, or become frustrated when the conversation lives here.`}
+              tone="warn"
+            />
+          )}
         </div>
 
         <div className="mt-5 rounded-xl bg-canvas-subtle p-4">
