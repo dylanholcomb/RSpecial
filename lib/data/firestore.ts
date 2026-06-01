@@ -9,21 +9,42 @@
 // service account running the container must have roles/datastore.user.
 // Locally, ADC falls back to whatever account is signed in via `gcloud auth
 // application-default login`.
+//
+// PROJECT RESOLUTION (v0.6.6, May 28, 2026):
+// The client's project ID is resolved from environment variables in this
+// order: GOOGLE_CLOUD_PROJECT, GCP_PROJECT, VERTEX_AI_PROJECT. If NONE of
+// these are set, we throw on first use rather than silently falling back to
+// a hard-coded project — the old behavior (default to "lq-platform-foundation")
+// caused a stage deployment to read+write against dev's Firestore using
+// stage's service account, which produced a misleading PERMISSION_DENIED
+// because stage's SA had no rights on dev. Failing fast is loud and clear.
 // =============================================================================
 
 import { Firestore } from "@google-cloud/firestore";
 
 let _client: Firestore | null = null;
 
+function resolveProjectId(): string {
+  const candidates = [
+    process.env.GOOGLE_CLOUD_PROJECT,
+    process.env.GCP_PROJECT,
+    process.env.VERTEX_AI_PROJECT,
+  ];
+  for (const v of candidates) {
+    if (v && v.trim()) return v.trim();
+  }
+  throw new Error(
+    "Firestore client: no project ID configured. Set one of " +
+    "GOOGLE_CLOUD_PROJECT, GCP_PROJECT, or VERTEX_AI_PROJECT on the runtime. " +
+    "Cloud Run does not auto-populate GOOGLE_CLOUD_PROJECT; set it explicitly " +
+    "to the project containing the Firestore database for this environment.",
+  );
+}
+
 /** Returns a singleton Firestore client. Lazily initialized. */
 export function getFirestore(): Firestore {
   if (!_client) {
-    _client = new Firestore({
-      projectId:
-        process.env.GOOGLE_CLOUD_PROJECT ||
-        process.env.VERTEX_AI_PROJECT ||
-        "lq-platform-foundation",
-    });
+    _client = new Firestore({ projectId: resolveProjectId() });
   }
   return _client;
 }
