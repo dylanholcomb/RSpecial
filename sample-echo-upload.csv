@@ -1,0 +1,6 @@
+name,email,role,cv,rv,al,cl,initials,backstory,recentcontext,assessmentdate
+Sample Single,sample.single@example.com,Sample role 1,86,44,42,38,,Sample backstory text.,"Sample recent context.",2026-05-01
+Sample Dual,sample.dual@example.com,Sample role 2,80,76,42,30,,,"",2026-05-01
+Sample Triple,sample.triple@example.com,Sample role 3,80,76,68,22,,,,2026-05-01
+Sample Flexer,sample.flexer@example.com,Sample role 4,65,65,65,65,,,,2026-05-01
+,bad-row@example.com,,200,abc,50,50,,,,
