@@ -7,7 +7,7 @@
 // underlying score distribution, not just the named habits. Stays small and
 // monochrome-ish so the habit chips remain the dominant visual element.
 
-import type { HabitCode, HabitScores } from "@/lib/lq-engine";
+import { HABITS, type HabitCode, type HabitScores } from "@/lib/lq-engine";
 
 const BAR_ORDER: HabitCode[] = ["CV", "RV", "AL", "CL"];
 
@@ -50,6 +50,7 @@ export function ScoreBars({ scores, className, ariaLabel }: Props) {
         const h = Math.max(minBar, Math.round((v / max) * height));
         const x = i * (barWidth + gap);
         const y = height - h;
+        const habit = HABITS[code];
         return (
           <rect
             key={code}
@@ -59,7 +60,12 @@ export function ScoreBars({ scores, className, ariaLabel }: Props) {
             height={h}
             rx={1}
             className={BAR_COLOR[code]}
-          />
+          >
+            {/* Per Anne UX feedback (May 26, 2026): hover tooltip on each
+                bar surfaces the habit name, code, and score so the
+                visualization teaches itself to new users. */}
+            <title>{`${habit.name} (${code}) — score ${v}/100`}</title>
+          </rect>
         );
       })}
     </svg>

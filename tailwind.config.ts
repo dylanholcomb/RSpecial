@@ -9,12 +9,23 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Listening habit colors — used as accent throughout the app.
+        // -----------------------------------------------------------------
+        // Listening habit colors — CANONICAL ECHO palette
+        // -----------------------------------------------------------------
+        // Per Allison's SME correction (May 26, 2026), these colors mirror
+        // the official ECHO profile report exactly. Do not change without
+        // SME sign-off — these are LQ brand colors, not arbitrary picks.
+        //
+        //   CV (Connective) — green
+        //   RV (Reflective) — blue
+        //   AL (Analytical) — gray
+        //   CL (Conceptual) — purple
+        // -----------------------------------------------------------------
         habit: {
-          connective: "#E07A5F",   // warm coral — relational
-          reflective: "#81B29A",   // sage — emotional
-          analytical: "#3D5A80",   // deep blue — logic
-          conceptual: "#9B5DE5",   // violet — vision
+          connective: "#10B981",   // green   — relational
+          reflective: "#3B82F6",   // blue    — emotional / experiential
+          analytical: "#6B7280",   // gray    — logic / data
+          conceptual: "#A855F7",   // purple  — vision / ideation
         },
         ink: {
           900: "#0F1419",
